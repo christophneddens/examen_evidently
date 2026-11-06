@@ -1,8 +1,9 @@
-"""monitoring of bike rental model wit Evidently (exam).
+"""monitoring of bike rental model wi Evidently (exam).
 
 Steps:
 1. Download and extract the UCI Bike Sharing dataset.
 2. Reference = January 2011, production = February 2011.
+3. Train a RandomForestRegressor and validate it with a Report + tests.
 """
 import os
 import warnings
@@ -10,6 +11,13 @@ import zipfile
 
 import pandas as pd
 import requests
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+from evidently import Report
+from evidently.core.datasets import Dataset, DataDefinition, Regression
+from evidently.metrics import RMSE, R2Score
+from evidently.tests import gt, lt
 
 #hide library warnings so that the output stays readable
 warnings.filterwarnings("ignore")
@@ -20,6 +28,12 @@ DATA_URL = ("https://archive.ics.uci.edu/static/public/275/"
 DATA_DIR = "data"
 ZIP_PATH = os.path.join(DATA_DIR, "bike_sharing.zip")
 CSV_PATH = os.path.join(DATA_DIR, "hour.csv")
+
+TARGET = "cnt"
+PREDICTION = "prediction"
+NUM_FEATURES = ["temp", "atemp", "hum", "windspeed", "hr", "weekday"]
+CAT_FEATURES = ["season", "holiday", "workingday", "weathersit"]
+FEATURES = NUM_FEATURES + CAT_FEATURES
 
 
 #1.Ingestion
@@ -37,7 +51,7 @@ def download_data():
     print(f"Data ready: {CSV_PATH}")
 
 
-#2preparation
+#2.Preparation
 def select_dates(df, start, end):
     """Return the rows between two dates (both included)."""
     mask = (df["dteday"] >= start) & (df["dteday"] <= end)
@@ -54,10 +68,52 @@ def load_data():
     return reference, production
 
 
+def make_dataset(df):
+    """Wrap a DataFrame for Evidently: say which column is what."""
+    definition = DataDefinition(
+        numerical_columns=NUM_FEATURES + [TARGET, PREDICTION],
+        categorical_columns=CAT_FEATURES,
+        regression=[Regression(target=TARGET, prediction=PREDICTION)],
+    )
+    return Dataset.from_pandas(df, data_definition=definition)
+
+
+#3.training and validation
+def train_model(january):
+    """Split January 70/30, train the model, return model and test set."""
+    train, test = train_test_split(january, test_size=0.3, random_state=42)
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(train[FEATURES], train[TARGET])
+    test = test.copy()
+    test[PREDICTION] = model.predict(test[FEATURES])
+    return model, test
+
+
+def validate_model(test):
+    """Run a Report with tests on the January test set."""
+    report = Report(
+        metrics=[RMSE(tests=[lt(50)]), R2Score(tests=[gt(0.7)])],
+        include_tests=True,
+    )
+    snapshot = report.run(current_data=make_dataset(test),
+                          tags=["validation"])
+    result = snapshot.dict()
+    for test_result in result["tests"]:
+        print(" ", test_result["status"], "-", test_result["description"])
+    failed = [t for t in result["tests"] if t["status"] != "SUCCESS"]
+    if failed:
+        print("Model NOT validated for production.")
+    else:
+        print("Model validated for production.")
+    return snapshot
+
+
 def main():
     """Run all steps in order."""
     download_data()
     january, february = load_data()
+    model, january_test = train_model(january)
+    validation = validate_model(january_test)
 
 
 if __name__ == "__main__":
