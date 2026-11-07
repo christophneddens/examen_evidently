@@ -1,11 +1,12 @@
-"""monitoring of bike rental model with Evidently (exam).
+"""Monitoring of bike rental model with Evidently (exam).
 
-Steps:
-1. Download and extract the UCI Bike Sharing dataset.
-2. Reference = January 2011, production = February 2011.
-3. Train a RandomForestRegressor and validate it with a Report + tests.
-4. Create the Workspace and the project.
-5. One RegressionPreset snapshot per February week (W1, W2, W3).
+step:
+1.download and extract the UCI Bike Sharing dataset.
+2.reference = January 2011, production = February 2011.
+3.train a RandomForestRegressor and validate it with a Report + tests.
+4.create the Workspace and the project.
+5.one RegressionPreset snapshot per February week (W1, W2, W3).
+6.drift diagnosis for the worst week, exported as HTML.
 """
 import os
 import warnings
@@ -19,12 +20,12 @@ from sklearn.model_selection import train_test_split
 
 from evidently import Report
 from evidently.core.datasets import Dataset, DataDefinition, Regression
-from evidently.metrics import RMSE, R2Score
-from evidently.presets import RegressionPreset
+from evidently.metrics import RMSE, R2Score, ValueDrift
+from evidently.presets import DataDriftPreset, RegressionPreset
 from evidently.tests import gt, lt
 from evidently.ui.workspace import Workspace
 
-# Hide library warnings so that the output stays readable
+#hide library warnings so that the output stays readable
 warnings.filterwarnings("ignore")
 
 #settings
@@ -36,6 +37,7 @@ CSV_PATH = os.path.join(DATA_DIR, "hour.csv")
 
 WORKSPACE_PATH = "bike_sharing_monitoring"
 PROJECT_NAME = "Bike Rental Monitoring"
+REPORT_PATH = "diagnostic_report.html"
 
 TARGET = "cnt"
 PREDICTION = "prediction"
@@ -65,7 +67,7 @@ def download_data():
     print(f"Data ready: {CSV_PATH}")
 
 
-#2.Preparation
+#2.preparation
 def select_dates(df, start, end):
     """Return the rows between two dates (both included)."""
     mask = (df["dteday"] >= start) & (df["dteday"] <= end)
@@ -92,7 +94,7 @@ def make_dataset(df):
     return Dataset.from_pandas(df, data_definition=definition)
 
 
-#3.Training and validation
+#3.training and validation
 def train_model(january):
     """Split January 70/30, train the model, return model and test set."""
     train, test = train_test_split(january, test_size=0.3, random_state=42)
@@ -122,7 +124,7 @@ def validate_model(test):
     return snapshot
 
 
-#4. Workspace
+#4.workspace
 def create_project():
     """Create the Workspace and a fresh project (an old one is deleted)."""
     ws = Workspace.create(WORKSPACE_PATH)
@@ -134,7 +136,7 @@ def create_project():
     return ws, project
 
 
-#5.Production simulation
+#5.production simulation
 def monitor_weeks(ws, project, model, reference, february):
     """Save one RegressionPreset snapshot per week; return data and RMSE."""
     weeks = {}
@@ -156,6 +158,30 @@ def monitor_weeks(ws, project, model, reference, february):
     return weeks
 
 
+#6.final diagnosis
+def diagnose(ws, project, reference, weeks):
+    """Target drift + numerical data drift for the worst week, as HTML."""
+    worst = max(weeks, key=lambda name: weeks[name][1])
+    print(f"Most degraded week: {worst}")
+    report = Report(
+        metrics=[
+            ValueDrift(column=TARGET),
+            DataDriftPreset(columns=NUM_FEATURES),
+        ],
+        include_tests=True,
+    )
+    snapshot = report.run(
+        current_data=make_dataset(weeks[worst][0]),
+        reference_data=make_dataset(reference),
+        tags=["diagnosis", worst],
+    )
+    for test_result in snapshot.dict()["tests"]:
+        print(" ", test_result["status"], "-", test_result["name"])
+    ws.add_run(project.id, snapshot)
+    snapshot.save_html(REPORT_PATH)
+    print(f"Diagnostic report saved: {REPORT_PATH}")
+
+
 def main():
     """Run all steps in order."""
     download_data()
@@ -165,6 +191,7 @@ def main():
     ws, project = create_project()
     ws.add_run(project.id, validation)
     weeks = monitor_weeks(ws, project, model, january_test, february)
+    diagnose(ws, project, january_test, weeks)
 
 
 if __name__ == "__main__":
