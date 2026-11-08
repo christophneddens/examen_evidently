@@ -45,7 +45,7 @@ Stop with `Ctrl+C`, then `docker compose down`.
 
 Choices:
 - Features: `temp`, `atemp`, `hum`, `windspeed`, `hr`, `weekday`, `season`, `holiday`, `workingday`, `weathersit`. `casual` and `registered` are left out because `cnt = casual + registered` (leakage).
-- Reference for the weekly reports = the 30 % test part of January (data the model did not train on).
+- Reference for the weekly reports and the diagnosis = the 30 % test part of January (data the model did not train on).
 - Technical validation result: RMSE 15.6 < 50 and R² 0.90 > 0.7 → model validated for production.
 - Docker image `python:3.12-slim`, because scikit-learn 1.8.0 needs Python ≥ 3.11.
 - `evidently ui --host 0.0.0.0`, otherwise the UI is not reachable from outside the container.
@@ -72,17 +72,17 @@ Diagnosis of W3 against January (`diagnostic_report.html`):
 - **Target drift:** detected on `cnt` (p-value ≈ 0.00). Average rentals per hour: 55.5 → 84.2 (+52 %); highest value: 249 → 327.
 - **Data drift:** detected on `temp`, `atemp`, `hum` and `windspeed`; **no** drift on `hr` and `weekday`. 4 of 6 numerical columns drifted, so the test "Share of Drifted Columns < 0.5" failed.
 
-| Weather (average) | January | W3 | in real units (dataset Readme) |
+| Weather (average) | January | W3 | in real units (data/Readme.txt) |
 |---|---|---|---|
-| temp | 0.197 | 0.363 | ≈ 1 °C → ≈ 9 °C |
-| atemp (felt) | 0.204 | 0.353 | ≈ −3 °C → ≈ 7 °C |
-| hum | 0.574 | 0.424 | 57 % → 42 % |
-| windspeed | 0.197 | 0.297 | 13 → 20 (+50 %) |
+| temp (× 41) | 0.197 | 0.363 | ≈ 8 °C → ≈ 15 °C |
+| atemp, felt (× 50) | 0.204 | 0.353 | ≈ 10 °C → ≈ 18 °C |
+| hum (× 100) | 0.574 | 0.424 | 57 % → 42 % |
+| windspeed (× 67) | 0.197 | 0.297 | 13 → 20 (+50 %) |
 
-**Explanation:** the drop is explained by the **weather**. W3 was much warmer (about +8 °C), drier and windier than
+**Explanation:** the drop is explained by the **weather**. W3 was much warmer (about +7 °C), drier and windier than
 January, and warm weather brings more people onto bikes, hence the target drift. The calendar features (`hr`, `weekday`)
-did not drift, so the cause is not the timing. The model was trained on January only and has never seen such mild
-temperatures (data drift out of the training range). A random forest also cannot predict more than the values it saw in
+did not drift, so the cause is not the timing. The model was trained on January only and has seen hardly any such mild
+hours (data drift towards the edge of the training range). A random forest also cannot predict more than the values it saw in
 training (at most 249 rentals per hour in January), so it under-predicts the busy hours of W3.
 
 ### 3. Remediation — which automatic action in production?
